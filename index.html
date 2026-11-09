@@ -375,4 +375,374 @@ function errors(){
     if(n.fingers[0]!==ts){bad.add(n.id);list.push(`N${n.id}: successeur`)}
     if(n.pred!==tp){bad.add(n.id);list.push(`N${n.id}: prédécesseur`)}
     for(let k=0;k<S.m;k++){ if(n.fingers[k]!==trueSucc(startOf(n,k))){bad.add(n.id);list.push(`N${n.id}: doigt ${k}`);break} }
-    for(const key of n.data) if(trueSucc(key)!==n){bad.add(n.id);list.push(`N${n.id}: clé
+    for(const key of n.data) if(trueSucc(key)!==n){bad.add(n.id);list.push(`N${n.id}: clé ${key}`)}
+  });
+  return{list,bad};
+}
+function syncReplicas(){
+  for(const n of S.nodes.values())n.replica=new Set();
+  if(!S.replicate)return;
+  const r=sortedNodes(); r.forEach((n,i)=>{const t=r[(i+1)%r.length]; if(t!==n)t.replica=new Set(n.data)});
+}
+function holderOf(k){for(const n of S.nodes.values())if(n.data.has(k))return n;return null}
+
+/* ============================ Journal et état ============================ */
+const $=id=>document.getElementById(id);
+function logEv(html,cls=""){S.log.unshift({t:new Date(),html,cls}); if(S.log.length>200)S.log.pop()}
+const fmtT=d=>d.toTimeString().slice(0,8);
+function setErr(id,msg){$(id).textContent=msg||""}
+const N_=n=>"N"+n.id;
+
+/* ============================ Géométrie / rendu ============================ */
+const CX=300,CY=300,R=248;
+const ang=id=>-Math.PI/2+2*Math.PI*id/S.size;
+const P=(id,r=R)=>[CX+r*Math.cos(ang(id)),CY+r*Math.sin(ang(id))];
+const f1=x=>x.toFixed(1);
+function nodeR(){const c=S.nodes.size;return c<=16?19:c<=40?14:9}
+
+function drawRing(){
+  const svg=$("ring"); const nodes=sortedNodes(); const err=errors(); const sel=S.selected&&S.nodes.get(S.selected);
+  let h=`<circle class="ringline" cx="${CX}" cy="${CY}" r="${R}"/>`;
+  /* graduations */
+  const step=S.size<=128?1:Math.ceil(S.size/128), big=S.size/8;
+  for(let i=0;i<S.size;i+=step){
+    const isBig=i%big===0, [x1,y1]=P(i,R-(isBig?9:5)), [x2,y2]=P(i,R+(isBig?9:5));
+    h+=`<line class="tick ${isBig?"big":""}" x1="${f1(x1)}" y1="${f1(y1)}" x2="${f1(x2)}" y2="${f1(y2)}"/>`;
+    if(isBig){const[tx,ty]=P(i,R-40);h+=`<text class="tlabel" x="${f1(tx)}" y="${f1(ty)}" font-size="11">${i}</text>`}
+  }
+  h+=`<text class="cap" x="${CX}" y="${CY-6}"><tspan x="${CX}" font-size="15" font-weight="600" fill="var(--ink)" style="fill:var(--ink)">${S.nodes.size} nœud${S.nodes.size>1?"s":""}</tspan></text>`;
+  h+=`<text class="cap" x="${CX}" y="${CY+14}">espace [0, ${S.size-1}] · m = ${S.m}</text>`;
+  /* arcs successeur */
+  if(nodes.length>1&&nodes.length<=30){
+    nodes.forEach((n,i)=>{const t=nodes[(i+1)%nodes.length];
+      let d=(t.id-n.id+S.size)%S.size; const[x1,y1]=P(n.id),[x2,y2]=P(t.id);
+      h+=`<path class="succ" d="M${f1(x1)} ${f1(y1)} A${R} ${R} 0 ${d>S.size/2?1:0} 1 ${f1(x2)} ${f1(y2)}"/>`;
+      const mid=(n.id+d/2)%S.size, a=ang(mid), [mx,my]=P(mid), deg=a*180/Math.PI+90;
+      h+=`<path class="succarrow" d="M0 -6 L5 4 L-5 4Z" transform="translate(${f1(mx)} ${f1(my)}) rotate(${f1(deg)})"/>`;
+    });
+  }
+  /* clés */
+  const keys=[...S.keys.entries()];
+  if(keys.length<=40) for(const[k,label] of keys){
+    const[kx,ky]=P(k,R+24),[lx,ly]=P(k,R+40),hld=holderOf(k);
+    if(hld){ const d=(hld.id-k+S.size)%S.size,[hx,hy]=P(hld.id,R+24);
+      if(d>0)h+=`<path class="keylink" d="M${f1(kx)} ${f1(ky)} A${R+24} ${R+24} 0 ${d>S.size/2?1:0} 1 ${f1(hx)} ${f1(hy)}"/>`;
+      h+=`<path class="key" d="M${f1(kx)} ${f1(ky-6)} l5 6 l-5 6 l-5 -6z"><title>clé ${k} (${label}) → N${hld.id}</title></path>`;
+    }else h+=`<path class="key lost" d="M${f1(kx)} ${f1(ky-6)} l5 6 l-5 6 l-5 -6z"><title>clé ${k} perdue</title></path>`;
+    h+=`<text class="klabel" x="${f1(lx)}" y="${f1(ly)}">${k}</text>`;
+  }
+  if(S.anim&&S.lookupView){const k=S.lookupView.kid,[kx,ky]=P(k,R+24),[lx,ly]=P(k,R+42);
+    h+=`<path d="M${f1(kx)} ${f1(ky-9)} l8 9 l-8 9 l-8 -9z" fill="var(--lookup)" stroke="var(--surface)" stroke-width="2"/><text class="klabel" x="${f1(lx)}" y="${f1(ly)}" style="fill:var(--lookup);font-weight:600">k=${k}</text>`}
+  /* doigts du nœud sélectionné */
+  if(sel){
+    const groups=new Map(); sel.fingers.forEach((f,i)=>{if(!groups.has(f.id))groups.set(f.id,[]);groups.get(f.id).push(i)});
+    const[sx,sy]=P(sel.id);
+    for(const[tid,is] of groups){ if(tid===sel.id)continue;
+      const[tx,ty]=P(tid),mx=(sx+tx)/2,my=(sy+ty)/2,cx=CX+(mx-CX)*.35,cy=CY+(my-CY)*.35;
+      h+=`<path class="fing" d="M${f1(sx)} ${f1(sy)} Q${f1(cx)} ${f1(cy)} ${f1(tx)} ${f1(ty)}"/>`;
+      const bx=.25*sx+.5*cx+.25*tx,by=.25*sy+.5*cy+.25*ty;
+      h+=`<text class="flabel" x="${f1(bx)}" y="${f1(by)}">${is.length>2?is[0]+"–"+is[is.length-1]:is.join(",")}</text>`;
+    }
+  }
+  /* nœuds */
+  const r=nodeR(), A=S.anim;
+  for(const n of nodes){
+    const[x,y]=P(n.id); let cls="nd";
+    if(n.id===S.selected)cls+=" sel";
+    if(err.bad.has(n.id))cls+=" pend";
+    if(S.enter.has(n.id))cls+=" enter";
+    if(S.flash.has(n.id))cls+=" flash";
+    if(A){ if(A.start===n.id)cls+=" start"; if(A.cur===n.id)cls+=" cur"; if(A.final===n.id)cls+=" fin"}
+    const showLbl=nodes.length<=40||n.id===S.selected;
+    h+=`<g class="${cls}" data-id="${n.id}"><title>N${n.id} · pred ${n.pred?"N"+n.pred.id:"?"} · succ N${succ(n).id} · clés [${[...n.data].sort((a,b)=>a-b)}]</title><circle cx="${f1(x)}" cy="${f1(y)}" r="${r}"/>`+
+      (showLbl?`<text x="${f1(x)}" y="${f1(y)}" font-size="${r>=19?12:r>=14?10:9}">${nodes.length<=40?"N"+n.id:n.id}</text>`:"")+
+      (A&&A.final===n.id?`<circle class="pulse" cx="${f1(x)}" cy="${f1(y)}" r="${r}"/>`:"")+`</g>`;
+  }
+  for(const g of S.ghosts){const[x,y]=P(g.id);h+=`<g class="ghost"><circle cx="${f1(x)}" cy="${f1(y)}" r="${r}"/><text x="${f1(x)}" y="${f1(y)}" font-size="11">N${g.id}</text></g>`}
+  h+=`<g id="overlay"></g>`;
+  svg.innerHTML=h;
+  drawOverlay();
+}
+const bez=(p0,c,p1,t)=>[(1-t)**2*p0[0]+2*(1-t)*t*c[0]+t*t*p1[0],(1-t)**2*p0[1]+2*(1-t)*t*c[1]+t*t*p1[1]];
+function ctrl(a,b){const mx=(a[0]+b[0])/2,my=(a[1]+b[1])/2;return[CX+(mx-CX)*.4,CY+(my-CY)*.4]}
+function drawOverlay(){
+  const o=$("overlay"); const A=S.anim; if(!o)return; if(!A){o.innerHTML="";return}
+  let h="";
+  const seg=(a,b,t)=>{const p0=P(a),p1=P(b),c=ctrl(p0,p1);let d=`M${f1(p0[0])} ${f1(p0[1])}`;
+    const n=Math.max(2,Math.round(24*t));for(let i=1;i<=n;i++){const q=bez(p0,c,p1,t*i/n);d+=` L${f1(q[0])} ${f1(q[1])}`}return d};
+  for(const[a,b] of A.done) h+=`<path class="path" d="${seg(a,b,1)}"/>`+arrow(a,b);
+  if(A.moving){const{a,b,t}=A.moving; h+=`<path class="path" d="${seg(a,b,Math.max(t,.001))}"/>`;
+    const p0=P(a),p1=P(b),c=ctrl(p0,p1),q=bez(p0,c,p1,t);
+    h+=`<circle class="tokenring" cx="${f1(q[0])}" cy="${f1(q[1])}" r="13"/><text class="toktxt" x="${f1(q[0])}" y="${f1(q[1])}">k</text>`}
+  else if(A.at!==undefined&&!A.final){const q=P(A.at);h+=`<circle class="tokenring" cx="${f1(q[0])}" cy="${f1(q[1])}" r="13"/><text class="toktxt" x="${f1(q[0])}" y="${f1(q[1])}">k</text>`}
+  o.innerHTML=h;
+}
+function arrow(a,b){const p0=P(a),p1=P(b),c=ctrl(p0,p1),q=bez(p0,c,p1,.86),q2=bez(p0,c,p1,.9);
+  const dg=Math.atan2(q2[1]-q[1],q2[0]-q[0])*180/Math.PI+90;
+  return `<path d="M0 -7 L6 5 L-6 5Z" fill="var(--lookup)" transform="translate(${f1(q2[0])} ${f1(q2[1])}) rotate(${f1(dg)})"/>`}
+
+/* ============================ Panneaux ============================ */
+function renderPane(){
+  const pane=$("pane"); document.querySelectorAll(".tab").forEach(t=>t.setAttribute("aria-selected",t.dataset.t===S.tab));
+  if(S.tab==="fing")pane.innerHTML=fingerHTML();
+  else if(S.tab==="look")pane.innerHTML=lookHTML();
+  else if(S.tab==="ring")pane.innerHTML=ringHTML();
+  else pane.innerHTML=logHTML();
+}
+function fingerHTML(){
+  const n=S.selected!=null&&S.nodes.get(S.selected);
+  if(!n)return `<p class="empty">Clique sur un nœud de l’anneau pour voir sa finger table.</p>`;
+  const ch=S.changed.get(n.id), act=S.anim&&S.anim.row!=null&&S.anim.cur===n.id?S.anim.row:-1;
+  let rows="";
+  for(let i=0;i<S.m;i++){
+    const a=startOf(n,i),b=startOf(n,i+1);
+    rows+=`<tr class="${ch&&ch.fingers.has(i)?"chg":""} ${i===act?"act":""}"><td>${i}</td><td>${n.id}+2<sup>${i}</sup> = ${a}</td><td>[${a}, ${b})</td><td>N${n.fingers[i].id}</td></tr>`;
+  }
+  return `<p class="pname">Finger table de N${n.id} <small>· ${S.m} entrées · pred ${n.pred?"N"+n.pred.id:"?"} · succ N${succ(n).id}</small></p>
+  <table><thead><tr><th>i</th><th>start</th><th>intervalle</th><th>succ</th></tr></thead><tbody>${rows}</tbody></table>
+  <p class="hint">Clés stockées : <span class="m">${n.data.size?[...n.data].sort((a,b)=>a-b).join(", "):"aucune"}</span>${S.replicate&&n.replica.size?` · répliques : <span class="m">${[...n.replica].sort((a,b)=>a-b).join(", ")}</span>`:""}</p>
+  ${ch?`<p class="hint">Lignes surlignées : entrées modifiées par la dernière opération.</p>`:""}`;
+}
+function lookHTML(){
+  const L=S.lookupView; if(!L)return `<p class="empty">Lance un lookup (bloc 3) : le trajet s’anime sur l’anneau et chaque saut est expliqué ici.</p>`;
+  const ctrlh=`<div class="ctrl"><button class="btn alt" id="bauto" type="button">${S.auto?"Pause":"Lecture"}</button><button class="btn alt" id="bnext" type="button">Étape suivante</button><button class="btn alt" id="bre" type="button">Rejouer</button></div>`;
+  const fin=L.idx>=L.steps.length;
+  let li=L.steps.map((s,i)=>`<li class="${fin?(s.end?"end":"done"):i<L.idx?"done":i===L.idx?"now":""}">${s.html}</li>`).join("");
+  const res=L.idx>=L.steps.length?`<div class="result"><b>Résultat :</b> la clé <code>${L.kid}</code> est gérée par <b>N${L.res.id}</b> en <b>${L.hops} saut${L.hops>1?"s":""}</b> (log₂ ${S.nodes.size} ≈ ${Math.log2(S.nodes.size).toFixed(1)}). Le successeur sur l’anneau est identique : ${L.res===trueSucc(L.kid)?"<b style='color:var(--ok)'>vérifié ✓</b>":"<b style='color:var(--err)'>écart ✗</b>"}.<br>Algorithme classique (de successeur en successeur) : ${L.naive} saut${L.naive>1?"s":""}.</div>`:"";
+  return `<p class="pname">Lookup de <span class="m">${L.label}</span> <small>· id ${L.kid} · départ N${L.start}</small></p>${ctrlh}<ol class="steps">${li}</ol>${res}`;
+}
+function ringHTML(){
+  const err=errors(); const rows=sortedNodes().map(n=>`<tr><td>N${n.id}</td><td>${n.name!=="N"+n.id?n.name:""}</td><td>N${n.pred?n.pred.id:"?"}</td><td>N${succ(n).id}</td><td>${[...n.data].sort((a,b)=>a-b).join(", ")||"—"}</td><td style="color:var(--${err.bad.has(n.id)?"warn":"ok"})">${err.bad.has(n.id)?"à stabiliser":"cohérent"}</td></tr>`).join("");
+  return `<table><thead><tr><th>nœud</th><th>nom</th><th>pred</th><th>succ</th><th>clés</th><th>état</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+function logHTML(){
+  if(!S.log.length)return `<p class="empty">Aucun événement.</p>`;
+  return `<ul class="log">${S.log.map(e=>`<li class="${e.cls}"><time>${fmtT(e.t)}</time>${e.html}</li>`).join("")}</ul>`;
+}
+function refreshSelects(){
+  const ids=sortedNodes().map(n=>n.id);
+  const cur=$("lkstart").value, cur2=$("leavesel").value;
+  $("lkstart").innerHTML=`<option value="">au hasard</option>`+ids.map(i=>`<option value="${i}">N${i}</option>`).join("");
+  $("leavesel").innerHTML=ids.map(i=>`<option value="${i}">N${i}</option>`).join("");
+  if(ids.includes(+cur))$("lkstart").value=cur; if(ids.includes(+cur2))$("leavesel").value=cur2;
+}
+function refreshStatus(){
+  const e=errors(); const b=$("status"); b.classList.toggle("bad",e.list.length>0);
+  $("statustxt").textContent=e.list.length?`${e.bad.size} nœud${e.bad.size>1?"s":""} à stabiliser`:`anneau cohérent · ${S.nodes.size} nœud${S.nodes.size>1?"s":""}`;
+}
+function renderAll(){drawRing();renderPane();refreshSelects();refreshStatus()}
+
+/* ============================ Temporisation ============================ */
+function cancelRun(){S.runId++;clearTimeout(S.timer);if(S.resolveStep){const r=S.resolveStep;S.resolveStep=null;r()}}
+function waitStep(ms,force){
+  return new Promise(res=>{
+    S.resolveStep=res;
+    if(S.auto&&!(S.step&&!force)){S.timer=setTimeout(()=>{S.resolveStep=null;res()},ms/S.speed)}
+  });
+}
+const sleep=ms=>new Promise(r=>setTimeout(r,ms/S.speed));
+function tween(ms,fn,id){return new Promise(res=>{const t0=performance.now();
+  const f=now=>{ if(id!==S.runId){res();return} const t=Math.min(1,(now-t0)/(ms/S.speed)); fn(t); t<1?requestAnimationFrame(f):res()};
+  requestAnimationFrame(f)})}
+function flashNodes(ids){S.flash=new Set(ids);setTimeout(()=>{S.flash=new Set();drawRing()},1400)}
+function clearEnter(){setTimeout(()=>{S.enter=new Set()},900)}
+
+/* ============================ Actions ============================ */
+function parseNodes(txt){
+  const toks=txt.split(/[\s,;]+/).filter(Boolean), ids=new Map(), notes=[];
+  for(const t of toks){
+    let id,name; if(/^\d+$/.test(t)){id=Number(t)%S.size;name=null}else{id=hashId(t);name=t;notes.push(`${t} → ${id}`)}
+    if(ids.has(id))throw new Error(`Collision d'identifiant : ${t} donne ${id}, déjà pris. Augmente m ou change le nom.`);
+    ids.set(id,name);
+  }
+  if(!ids.size)throw new Error("Donne au moins un nœud.");
+  return{ids,notes};
+}
+function setM(m){S.m=m;S.size=2**m}
+function createRing(ids,m){
+  cancelRun(); S.anim=null;S.lookupView=null;S.nodes=new Map();S.keys=new Map();S.changed=new Map();S.ghosts=[];
+  setM(m); const list=[...ids.entries()]; const first=makeNode(list[0][0],list[0][1]); firstNode(first);
+  for(const[id,name] of list.slice(1)){const nd=makeNode(id,name); joinSeq(nd,first)}
+  let g=0; while(errors().list.length&&g++<60)stabilizeRound();
+  S.selected=sortedNodes()[0].id; S.enter=new Set(S.nodes.keys()); clearEnter();
+  logEv(`Anneau créé : m = ${m} (espace 0 à ${S.size-1}), ${S.nodes.size} nœuds : ${sortedNodes().map(N_).join(", ")}.`,"ok");
+  syncReplicas(); S.tab="fing"; renderAll();
+}
+$("create").onclick=()=>{
+  try{const m=Math.min(10,Math.max(3,parseInt($("m").value)||6)); $("m").value=m; setM(m);
+    const{ids,notes}=parseNodes($("nodes").value); setErr("err1",notes.length?"Hachage SHA-1 : "+notes.join(" ; "):"");
+    if(ids.size>S.size)throw new Error("Trop de nœuds pour cette valeur de m.");
+    createRing(ids,m)}catch(e){setErr("err1",e.message)}
+};
+$("random").onclick=()=>{
+  const m=Math.min(10,Math.max(3,parseInt($("m").value)||6)); $("m").value=m; setM(m);
+  const n=Math.min(parseInt($("nrand").value)||6,S.size,60), ids=new Set(); while(ids.size<n)ids.add(Math.floor(Math.random()*S.size));
+  $("nodes").value=[...ids].sort((a,b)=>a-b).join(", "); setErr("err1","");
+  createRing(new Map([...ids].map(i=>[i,null])),m);
+};
+const PRESETS=[["Cours · m=6",6,"1, 8, 14, 21, 32, 38"],["TD Ex.1 · m=7",7,"16, 32, 45, 80, 96, 112"],["TD Ex.2 · m=6",6,"1, 8, 14, 21, 32, 38, 42, 48, 51, 56"]];
+$("presets").innerHTML=PRESETS.map((p,i)=>`<button class="chip" type="button" data-p="${i}">${p[0]}</button>`).join("");
+$("presets").onclick=e=>{const b=e.target.closest("[data-p]");if(!b)return;const p=PRESETS[b.dataset.p];$("m").value=p[1];$("nodes").value=p[2];$("create").click()};
+
+$("join").onclick=()=>{
+  setErr("err2","");
+  try{
+    if(!S.nodes.size)throw new Error("Crée d'abord l'anneau.");
+    let txt=$("joinid").value.trim(),id,name=null;
+    if(!txt){let g=0;do{S.counter++;name="peer"+S.counter;id=hashId(name)}while(S.nodes.has(id)&&g++<5000);}
+    else if(/^\d+$/.test(txt))id=Number(txt)%S.size; else{id=hashId(txt);name=txt}
+    if(S.nodes.has(id))throw new Error(`Le nœud ${id} existe déjà.`);
+    if(S.nodes.size>=S.size)throw new Error("Anneau plein : augmente m.");
+    cancelRun();S.anim=null;
+    const via=sortedNodes()[Math.floor(Math.random()*S.nodes.size)], before=snapshot();
+    const nd=makeNode(id,name); const r=joinSeq(nd,via); syncReplicas();
+    let g0=0; while(errors().list.length&&g0++<60)stabilizeRound();
+    const d=diff(before,snapshot()); S.changed=d; S.selected=id; S.enter=new Set([id]); clearEnter();
+    flashNodes([...d.keys()].filter(i=>i!==id));
+    logEv(`<b>N${id}</b>${name?` (${name})`:""} rejoint l'anneau via N${via.id}. lookup(${id}) → successeur <b>N${r.succ.id}</b>, prédécesseur <b>N${r.pred.id}</b>.`+
+      (r.moved.length?` Clés transférées : ${r.moved.join(", ")}.`:"")+(d.size?` Doigts corrigés chez ${[...d.keys()].map(i=>"N"+i).join(", ")}.`:""),"ok");
+    S.tab="fing"; $("joinid").value=""; renderAll();
+  }catch(e){setErr("err2",e.message)}
+};
+$("put").onclick=()=>{
+  const t=$("putkey").value.trim(); if(!t||!S.nodes.size)return; cancelRun();
+  const k=keyId(t),via=sortedNodes()[0],n=findSuccessor(via,k); n.data.add(k); S.keys.set(k,t); syncReplicas();
+  logEv(`Clé <b>${t}</b> (id ${k}) stockée sur <b>N${n.id}</b>.`,"ok"); $("putkey").value=""; S.anim=null; renderAll();
+};
+$("repl").onchange=()=>{S.replicate=$("repl").checked;syncReplicas();logEv(S.replicate?"Réplication activée : chaque clé est copiée sur le successeur.":"Réplication désactivée.");renderAll()};
+
+$("leave").onclick=async()=>{
+  const id=+$("leavesel").value; const n=S.nodes.get(id); if(!n)return;
+  if(S.nodes.size<2){logEv("Dernier nœud : l'anneau ne peut pas être vide.","warn");renderAll();return}
+  cancelRun();S.anim=null;const run=S.runId; const before=snapshot();
+  const keys=[...n.data]; const r=leaveGraceful(n); S.ghosts=[{id}]; syncReplicas();
+  let g=0; while(errors().list.length&&g++<60)stabilizeRound();
+  const d=diff(before,snapshot()); S.changed=d; S.selected=r.succ.id; flashNodes([...d.keys()]);
+  logEv(`<b>N${id}</b> quitte volontairement l'anneau. Ses clés (${keys.join(", ")||"aucune"}) passent à <b>N${r.succ.id}</b> ; les doigts qui le visaient pointent maintenant vers N${r.succ.id}.`+(d.size?` Tables modifiées : ${[...d.keys()].map(i=>"N"+i).join(", ")}.`:""),"ok");
+  S.tab="fing"; renderAll(); setTimeout(()=>{S.ghosts=[]},800);
+};
+$("crash").onclick=async()=>{
+  const id=+$("leavesel").value; const n=S.nodes.get(id); if(!n)return;
+  if(S.nodes.size<2){logEv("Dernier nœud : l'anneau ne peut pas être vide.","warn");renderAll();return}
+  cancelRun();S.anim=null;const run=S.runId; const keys=[...n.data];
+  const rec=crashNode(n); S.ghosts=[{id}]; S.selected=sortedNodes()[0].id;
+  const lost=keys.filter(k=>!rec.includes(k));
+  logEv(`<b>Panne de N${id}</b> : aucun message envoyé. Les voisins constatent qu'il ne répond plus.`+(S.replicate?` Clés récupérées sur le successeur : ${rec.join(", ")||"aucune"}.`:"")+(lost.length?` <b>Clés perdues : ${lost.join(", ")}</b>.`:""),"bad");
+  renderAll(); setTimeout(()=>{S.ghosts=[];drawRing()},800);
+  await stabilizeAnimated(run);
+};
+async function stabilizeAnimated(run,max=40){
+  let k=0;
+  while(errors().list.length&&k<max){
+    if(run!==S.runId)return; await waitStep(900,true); if(run!==S.runId)return;
+    const before=snapshot(); stabilizeRound(); k++;
+    const d=diff(before,snapshot()),e=errors(); S.changed=d;
+    flashNodes([...d.keys()]);
+    logEv(`Stabilisation, tour ${k} : ${d.size} nœud${d.size>1?"s":""} corrigé${d.size>1?"s":""}, ${e.bad.size} écart${e.bad.size>1?"s":""} restant${e.bad.size>1?"s":""}.`,e.list.length?"warn":"ok");
+    syncReplicas(); renderAll();
+  }
+  if(!errors().list.length){logEv(`Anneau cohérent après ${k} tour${k>1?"s":""} de stabilisation.`,"ok");renderAll()}
+}
+
+/* Lookup animé */
+function buildLookup(startNode,label){
+  const kid=keyId(label), trace=[]; const res=findSuccessor(startNode,kid,trace);
+  const steps=[],path=[startNode.id]; let hops=0;
+  for(const t of trace){
+    if(t.done){
+      const sc=t.succ;
+      steps.push({node:t.at.id,row:null,html:`<b>N${t.at.id}</b> : ${kid} ∈ ]${t.at.id}, ${sc.id}] ? <b>oui</b> → le responsable est le successeur <b>N${sc.id}</b>.`,end:true,to:sc.id!==t.at.id?sc.id:null});
+      if(sc.id!==t.at.id){path.push(sc.id);hops++}
+    }else{
+      steps.push({node:t.at.id,row:t.i,html:`<b>N${t.at.id}</b> : ${kid} ∈ ]${t.at.id}, ${succ(t.at).id}] ? non → doigt le plus éloigné dans ]${t.at.id}, ${kid}[ : <span class="m">i=${t.i}</span> (start ${t.start}) → <b>N${t.to.id}</b>.`,to:t.to.id});
+      path.push(t.to.id);hops++;
+    }
+  }
+  /* algorithme classique */
+  const target=trueSucc(kid); let naive=0,c=startNode; while(c!==target&&naive<S.nodes.size+2){c=succ(c);naive++}
+  return{kid,label,steps,path,res,hops,naive,start:startNode.id,idx:0};
+}
+async function runLookup(){
+  setErr("err3","");
+  if(!S.nodes.size){setErr("err3","Crée d'abord l'anneau.");return}
+  const label=$("lkkey").value.trim(); if(!label){setErr("err3","Donne une clé.");return}
+  cancelRun(); const run=S.runId;
+  const sv=$("lkstart").value, startNode=sv===""?sortedNodes()[Math.floor(Math.random()*S.nodes.size)]:S.nodes.get(+sv);
+  const L=buildLookup(startNode,label); S.lookupView=L;
+  const k=L.kid;
+  S.anim={start:L.start,cur:L.start,done:[],moving:null,at:L.start,final:null,row:null};
+  S.tab="look"; S.selected=L.start; renderAll();
+  logEv(`Lookup de <b>${label}</b> (id ${k}) depuis <b>N${L.start}</b>.`,"lk");
+  for(let i=0;i<L.steps.length;i++){
+    if(run!==S.runId)return;
+    const s=L.steps[i]; L.idx=i; S.anim.cur=s.node; S.anim.at=s.node; S.anim.row=s.row; S.selected=s.node;
+    renderAll(); bindCtrl();
+    await waitStep(1100); if(run!==S.runId)return;
+    if(s.to!=null&&s.to!==s.node){
+      await tween(650,t=>{S.anim.moving={a:s.node,b:s.to,t};drawOverlay()},run); if(run!==S.runId)return;
+      S.anim.done.push([s.node,s.to]); S.anim.moving=null; S.anim.cur=s.to; S.anim.at=s.to;
+    }
+  }
+  if(run!==S.runId)return;
+  L.idx=L.steps.length; S.anim.final=L.res.id; S.anim.cur=null; S.anim.moving=null; S.selected=L.res.id; S.anim.row=null;
+  logEv(`lookup(${k}) → <b>N${L.res.id}</b> en ${L.hops} saut${L.hops>1?"s":""} : ${L.path.map(i=>"N"+i).join(" → ")}.`,"lk");
+  renderAll(); bindCtrl();
+}
+function bindCtrl(){
+  const a=$("bauto"),n=$("bnext"),r=$("bre"); if(!a)return;
+  a.onclick=()=>{S.auto=!S.auto;a.textContent=S.auto?"Pause":"Lecture";if(S.auto&&S.resolveStep){clearTimeout(S.timer);const rs=S.resolveStep;S.timer=setTimeout(()=>{S.resolveStep=null;rs()},400/S.speed)}else if(!S.auto)clearTimeout(S.timer)};
+  n.onclick=()=>{if(S.resolveStep){clearTimeout(S.timer);const rs=S.resolveStep;S.resolveStep=null;rs()}};
+  r.onclick=()=>runLookup();
+}
+$("lookup").onclick=runLookup;
+
+/* Concurrence */
+$("conc").onclick=async()=>{
+  if(!S.nodes.size)return; cancelRun(); S.anim=null; const run=S.runId;
+  const p=Math.max(0,parseInt($("cp").value)||0), q=Math.min(Math.max(0,parseInt($("cq").value)||0),S.nodes.size-1);
+  const free=[]; for(let i=0;i<S.size;i++)if(!S.nodes.has(i))free.push(i);
+  const joinIds=free.sort(()=>Math.random()-.5).slice(0,p);
+  const victims=sortedNodes().map(n=>n.id).sort(()=>Math.random()-.5).slice(0,q);
+  const ops=[...joinIds.map(i=>({t:"j",id:i})),...victims.map(i=>({t:"l",id:i}))].sort(()=>Math.random()-.5);
+  logEv(`<b>Concurrence</b> : ${joinIds.length} arrivée${joinIds.length>1?"s":""} et ${victims.length} départ${victims.length>1?"s":""} en même temps.`,"lk");
+  S.tab="log"; renderAll();
+  for(const op of ops){
+    if(run!==S.runId)return;
+    if(op.t==="j"){
+      const alive=sortedNodes(); const via=alive[Math.floor(Math.random()*alive.length)];
+      const nd=makeNode(op.id,null); joinConc(nd,via); S.enter=new Set([op.id]); clearEnter();
+      logEv(`↦ N${op.id} arrive et trouve son successeur N${succ(nd).id} (rien d'autre n'est encore mis à jour).`,"ok");
+    }else{
+      const nd=S.nodes.get(op.id); if(!nd||S.nodes.size<2)continue;
+      S.ghosts=[{id:op.id}]; leaveGraceful(nd); logEv(`↤ N${op.id} part et confie ses clés à son successeur.`,"warn"); setTimeout(()=>{S.ghosts=[];drawRing()},800);
+    }
+    if(Math.random()<.5){const rn=sortedNodes();const n=rn[Math.floor(Math.random()*rn.length)];checkPred(n);stabilize(n);fixFingers(n)}
+    syncReplicas(); S.selected=S.nodes.has(S.selected)?S.selected:sortedNodes()[0].id; renderAll();
+    await sleep(650);
+  }
+  if(run!==S.runId)return;
+  const e=errors(); logEv(`Fin des opérations : ${e.bad.size} nœud${e.bad.size>1?"s":""} pas encore à jour. Lancement de la stabilisation.`,"warn"); renderAll();
+  await stabilizeAnimated(run);
+};
+
+/* Interface */
+$("pane").addEventListener("click",()=>{});
+$("tabs").onclick=e=>{const b=e.target.closest(".tab");if(!b)return;S.tab=b.dataset.t;renderPane();bindCtrl()};
+$("ring").addEventListener("click",e=>{const g=e.target.closest(".nd");if(!g)return;S.selected=+g.dataset.id;S.changed=new Map();if(S.tab!=="look")S.tab="fing";renderAll();bindCtrl()});
+$("speed").oninput=e=>{S.speed=+e.target.value;$("spv").textContent=S.speed.toFixed(1).replace(".0","")+"×"};
+$("stepmode").onchange=e=>{S.step=e.target.checked;if(!S.step&&S.resolveStep){clearTimeout(S.timer);const rs=S.resolveStep;S.resolveStep=null;rs()}};
+$("theme").onclick=()=>{const r=document.documentElement,dark=getComputedStyle(r).colorScheme.includes("dark");r.setAttribute("data-theme",dark?"light":"dark")};
+
+/* Démarrage : anneau de l'exercice 2 du TD, lookup(54) depuis N8 prêt à lancer */
+(function init(){
+  try{
+    setM(6); const ids=new Map([1,8,14,21,32,38,42,48,51,56].map(i=>[i,null]));
+    createRing(ids,6); S.selected=8; $("lkstart").value="8";
+    S.log=[]; logEv("Anneau d'exemple chargé (TD exercice 2). Lance le lookup de la clé 54 depuis N8 pour voir le trajet.","ok");
+    S.enter=new Set(); renderAll();
+  }catch(e){console.error(e)}
+})();
+</script>
+
+</body>
+</html>
