@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Simulateur Chord</title>
+<meta name="color-scheme" content="light dark">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Concept : un banc d'essai. L'anneau d'identifiants est l'instrument, les commandes sont à gauche, les tables et le journal à droite. */
+:root{
+  --bg:#edf0f6; --surface:#ffffff; --surface2:#e5e9f1; --ink:#142033; --ink2:#52607a; --line:#cdd5e2;
+  --accent:#2f5bea; --accent-soft:#dfe7fd; --lookup:#e8622c; --ok:#18915c; --warn:#b97d00; --err:#d23b3b;
+  --font-display:"Bricolage Grotesque","Segoe UI",system-ui,sans-serif;
+  --font-body:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0d1420; --surface:#151e2f; --surface2:#1d2940; --ink:#e7ecf6; --ink2:#9aa8c2; --line:#2a3752;
+  --accent:#7399ff; --accent-soft:#1e2c52; --lookup:#ff8a52; --ok:#3ccf8e; --warn:#e9b13a; --err:#ff7070; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0d1420; --surface:#151e2f; --surface2:#1d2940; --ink:#e7ecf6; --ink2:#9aa8c2; --line:#2a3752;
+  --accent:#7399ff; --accent-soft:#1e2c52; --lookup:#ff8a52; --ok:#3ccf8e; --warn:#e9b13a; --err:#ff7070; color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:14px/1.45 var(--font-body);padding-block:14px 28px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+button,input,select{font:inherit;color:inherit}
+.top{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:14px}
+h1{font:700 26px/1.1 var(--font-display);margin:0;letter-spacing:-.01em}
+.sub{margin:0;color:var(--ink2);font-size:13px}
+.titles{flex:1;min-width:220px}
+.badge{display:inline-flex;align-items:center;gap:8px;padding:5px 11px;border-radius:99px;background:var(--surface);border:1px solid var(--line);font:500 12.5px var(--font-mono)}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--ok)}
+.badge.bad .dot{background:var(--warn)}
+.iconbtn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:6px 11px;cursor:pointer;font-size:13px}
+.grid{display:grid;gap:14px;grid-template-columns:minmax(0,1fr)}
+@media (min-width:780px){.grid{grid-template-columns:330px minmax(0,1fr);align-items:start}.panel{grid-row:span 2}}
+@media (min-width:1220px){.grid{grid-template-columns:330px minmax(0,1fr) 410px}.panel{grid-row:auto}}
+.panel{display:flex;flex-direction:column;gap:12px;min-width:0}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 13px;min-width:0}
+.card h2{margin:0 0 9px;font:600 11.5px var(--font-mono);text-transform:uppercase;letter-spacing:.09em;color:var(--ink2)}
+.row{display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin-top:8px}
+.row:first-of-type{margin-top:0}
+label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--ink2);min-width:0}
+input[type=text],input[type=number],select{background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:7px 9px;color:var(--ink);min-width:0;width:100%}
+input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.w-s{width:74px}.grow{flex:1;min-width:110px}
+.btn{border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:7px;padding:7px 12px;cursor:pointer;font-weight:600;font-size:13px}
+:root[data-theme="dark"] .btn,
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .btn{color:#0b1220}}
+.btn.alt{background:transparent;color:var(--accent)}
+.btn.warn{background:transparent;border-color:var(--err);color:var(--err)}
+.btn.go{background:var(--lookup);border-color:var(--lookup)}
+.btn:hover{filter:brightness(1.07)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+.chip{border:1px dashed var(--line);background:transparent;border-radius:99px;padding:3px 10px;font:12px var(--font-mono);cursor:pointer;color:var(--ink2)}
+.chip:hover{border-color:var(--accent);color:var(--accent)}
+.hint{font-size:12px;color:var(--ink2);margin:7px 0 0}
+.err{color:var(--err);font-size:12.5px;margin:7px 0 0;min-height:1em}
+.check{flex-direction:row;align-items:center;gap:7px;color:var(--ink);font-size:13px;margin-top:9px}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.stage{min-width:0;display:flex;flex-direction:column;gap:10px}
+.ringcard{padding:8px;position:relative}
+#ring{display:block;width:100%;height:auto;max-height:78vh;aspect-ratio:1/1;margin-inline:auto;max-width:680px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;padding:4px 8px 6px;font-size:12px;color:var(--ink2)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{width:11px;height:11px;border-radius:50%;border:2px solid var(--ink);background:var(--surface)}
+.sw.sel{border-color:var(--accent)}.sw.cur{background:var(--lookup);border-color:var(--lookup)}.sw.fin{background:var(--ok);border-color:var(--ok)}.sw.pend{border:2px dashed var(--warn)}
+.ln{width:18px;height:0;border-top:3px solid var(--accent);opacity:.55}.ln.f{border-top:2px dashed var(--accent);opacity:1}.ln.l{border-top:3px solid var(--lookup);opacity:1}
+.side{min-width:0}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:10px;flex-wrap:wrap}
+.tab{border:0;background:none;padding:7px 11px;cursor:pointer;color:var(--ink2);font-weight:500;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tab[aria-selected=true]{color:var(--ink);border-bottom-color:var(--accent)}
+.pane{overflow-x:auto;max-height:560px;overflow-y:auto}
+table{border-collapse:collapse;width:100%;font:12.5px var(--font-mono)}
+th{text-align:left;font:600 11px var(--font-mono);color:var(--ink2);text-transform:uppercase;letter-spacing:.06em;padding:5px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:5px 8px;border-bottom:1px solid var(--line);white-space:nowrap;font-variant-numeric:tabular-nums}
+tr.chg td{background:var(--accent-soft)}
+tr.act td{background:color-mix(in srgb,var(--lookup) 20%,transparent);font-weight:600}
+.pname{font:600 13px var(--font-body);margin:0 0 8px}
+.pname small{font-weight:400;color:var(--ink2)}
+.steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:7px}
+.steps li{border:1px solid var(--line);border-left:4px solid var(--line);border-radius:6px;padding:7px 10px;font-size:13px;opacity:.5;transition:opacity .25s,border-color .25s,background .25s}
+.steps li.done{opacity:.85;border-left-color:var(--ink2)}
+.steps li.now{opacity:1;border-left-color:var(--lookup);background:color-mix(in srgb,var(--lookup) 10%,transparent)}
+.steps li.end{opacity:1;border-left-color:var(--ok)}
+code,.m{font-family:var(--font-mono);font-size:12.5px}
+.ctrl{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.result{margin-top:10px;padding:9px 11px;border-radius:8px;background:var(--surface2);font-size:13px}
+.log{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.log li{border-left:3px solid var(--accent);padding:3px 0 3px 9px;font-size:12.5px}
+.log li.ok{border-color:var(--ok)}.log li.warn{border-color:var(--warn)}.log li.bad{border-color:var(--err)}.log li.lk{border-color:var(--lookup)}
+.log time{color:var(--ink2);font:11px var(--font-mono);margin-right:6px}
+.empty{color:var(--ink2);padding:14px 4px}
+/* SVG */
+svg text{font-family:var(--font-mono)}
+.ringline{fill:none;stroke:var(--line);stroke-width:2}
+.tick{stroke:var(--line);stroke-width:1}.tick.big{stroke:var(--ink2);stroke-width:1.4}
+.tlabel{fill:var(--ink2);font-size:11px;text-anchor:middle;dominant-baseline:middle}
+.succ{fill:none;stroke:var(--accent);stroke-width:3.5;opacity:.38;stroke-linecap:round}
+.succarrow{fill:var(--accent);opacity:.7}
+.fing{fill:none;stroke:var(--accent);stroke-width:1.8;stroke-dasharray:5 4;opacity:.9;animation:dash 1.2s linear infinite}
+@keyframes dash{to{stroke-dashoffset:-18}}
+.flabel{fill:var(--accent);font-size:10.5px;font-weight:600;text-anchor:middle;dominant-baseline:middle;paint-order:stroke;stroke:var(--surface);stroke-width:3px}
+.nd circle{fill:var(--surface);stroke:var(--ink);stroke-width:2;transition:fill .25s,stroke .25s}
+.nd text{fill:var(--ink);text-anchor:middle;dominant-baseline:central;font-weight:600;pointer-events:none}
+.nd{cursor:pointer}
+.nd:hover circle{stroke:var(--accent)}
+.nd.sel circle{stroke:var(--accent);stroke-width:4}
+.nd.start circle{stroke:var(--accent);stroke-width:4;fill:var(--accent-soft)}
+.nd.cur circle{fill:var(--lookup);stroke:var(--lookup)}.nd.cur text{fill:#fff}
+.nd.fin circle{fill:var(--ok);stroke:var(--ok)}.nd.fin text{fill:#fff}
+.nd.pend circle{stroke:var(--warn);stroke-dasharray:4 3;animation:spin 6s linear infinite;transform-box:fill-box;transform-origin:center}
+@keyframes spin{to{transform:rotate(360deg)}}
+.nd.enter{animation:pop .55s cubic-bezier(.2,1.4,.4,1) both;transform-box:fill-box;transform-origin:center}
+@keyframes pop{from{transform:scale(.1);opacity:0}to{transform:scale(1);opacity:1}}
+.nd.flash circle{animation:flash 1.3s ease-out}
+@keyframes flash{0%{stroke:var(--warn);stroke-width:7}100%{stroke-width:2}}
+.ghost{animation:ghost .7s ease-in forwards;transform-box:fill-box;transform-origin:center;pointer-events:none}
+@keyframes ghost{to{transform:scale(1.7);opacity:0}}
+.ghost circle{fill:var(--surface);stroke:var(--err);stroke-width:3}.ghost text{fill:var(--err);text-anchor:middle;dominant-baseline:central;font-weight:600}
+.pulse{fill:none;stroke:var(--ok);stroke-width:3;animation:pulse 1.2s ease-out infinite;transform-box:fill-box;transform-origin:center}
+@keyframes pulse{from{transform:scale(1);opacity:.9}to{transform:scale(2.4);opacity:0}}
+.key{fill:var(--lookup)}.key.lost{fill:var(--err)}
+.keylink{fill:none;stroke:var(--lookup);stroke-width:1.4;stroke-dasharray:2 3;opacity:.75}
+.klabel{fill:var(--ink2);font-size:10.5px;text-anchor:middle;dominant-baseline:middle}
+.path{fill:none;stroke:var(--lookup);stroke-width:4.5;stroke-linecap:round}
+.tokenring{fill:var(--lookup);stroke:var(--surface);stroke-width:2.5}
+.toktxt{fill:#fff;font-size:10px;font-weight:600;text-anchor:middle;dominant-baseline:central}
+.cap{fill:var(--ink2);font-size:12px;text-anchor:middle}
+.cap b{fill:var(--ink)}
+@media (prefers-reduced-motion: reduce){.fing,.nd.pend circle,.pulse{animation:none}.nd.enter,.ghost{animation-duration:.01s}}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="titles"><h1>Simulateur Chord</h1><p class="sub">Table de hachage distribuée : anneau SHA-1 sur m bits, finger tables, lookup, arrivées et départs.</p></div>
+  <span class="badge" id="status"><span class="dot"></span><span id="statustxt">…</span></span>
+  <button class="iconbtn" id="theme" type="button" aria-label="Changer de thème">Thème</button>
+</header>
+
+<main class="grid">
+<aside class="panel">
+  <section class="card">
+    <h2>1 · Réseau</h2>
+    <div class="row">
+      <label class="w-s">m (bits)<input id="m" type="number" min="3" max="10" value="6"></label>
+      <label class="grow">Nœuds initiaux (ids ou noms)<input id="nodes" type="text" value="1, 8, 14, 21, 32, 38, 42, 48, 51, 56" spellcheck="false"></label>
+    </div>
+    <div class="row"><button class="btn" id="create" type="button">Créer l’anneau</button>
+      <label class="w-s">Nombre<input id="nrand" type="number" min="1" max="60" value="8"></label>
+      <button class="btn alt" id="random" type="button">Aléatoire</button></div>
+    <div class="chips" id="presets"></div>
+    <p class="hint">Un nombre est un identifiant. Un mot est haché avec SHA-1 puis réduit modulo 2<sup>m</sup>.</p>
+    <p class="err" id="err1"></p>
+  </section>
+  <section class="card">
+    <h2>2 · Joindre un nœud</h2>
+    <div class="row"><label class="grow">Identifiant ou nom (vide = auto)<input id="joinid" type="text" placeholder="ex. 24 ou alice"></label>
+      <button class="btn" id="join" type="button">Joindre</button></div>
+    <p class="err" id="err2"></p>
+  </section>
+  <section class="card">
+    <h2>3 · Lookup d’une clé</h2>
+    <div class="row"><label class="grow">Clé (nombre ou texte)<input id="lkkey" type="text" value="54"></label>
+      <label class="w-s" style="width:96px">Départ<select id="lkstart"></select></label></div>
+    <div class="row"><button class="btn go" id="lookup" type="button">Lancer le lookup</button></div>
+    <p class="err" id="err3"></p>
+  </section>
+  <section class="card">
+    <h2>4 · Quitter le réseau</h2>
+    <div class="row"><label class="w-s" style="width:96px">Nœud<select id="leavesel"></select></label>
+      <button class="btn alt" id="leave" type="button">Départ volontaire</button>
+      <button class="btn warn" id="crash" type="button">Panne brutale</button></div>
+    <p class="hint">La panne n’avertit personne : l’anneau se répare par stabilisation.</p>
+  </section>
+  <section class="card">
+    <h2>5 · Clés stockées</h2>
+    <div class="row"><label class="grow">Insérer une clé<input id="putkey" type="text" placeholder="ex. 30 ou fichier.mp3"></label>
+      <button class="btn alt" id="put" type="button">Insérer</button></div>
+    <label class="check"><input type="checkbox" id="repl"> Répliquer chaque clé sur le successeur</label>
+  </section>
+  <section class="card">
+    <h2>6 · Concurrence</h2>
+    <div class="row"><label class="w-s">p arrivées<input id="cp" type="number" min="0" max="30" value="4"></label>
+      <label class="w-s">q départs<input id="cq" type="number" min="0" max="30" value="2"></label>
+      <button class="btn" id="conc" type="button">Lancer</button></div>
+    <p class="hint">Les opérations s’entremêlent, puis la stabilisation répare l’anneau tour par tour.</p>
+  </section>
+  <section class="card">
+    <h2>Animation</h2>
+    <label>Vitesse <span class="m" id="spv">1×</span><input id="speed" type="range" min="0.4" max="3" step="0.1" value="1"></label>
+    <label class="check"><input type="checkbox" id="stepmode"> Mode pas à pas (bouton « Étape suivante »)</label>
+  </section>
+</aside>
+
+<section class="stage" style="min-width:0">
+  <div class="card ringcard">
+    <svg id="ring" viewBox="-14 -14 628 628" role="img" aria-label="Anneau Chord avec les nœuds, les clés et les chemins de lookup"></svg>
+    <div class="legend">
+      <span><i class="sw"></i>nœud</span><span><i class="sw sel"></i>sélectionné</span><span><i class="sw cur"></i>étape du lookup</span><span><i class="sw fin"></i>responsable</span><span><i class="sw pend"></i>à stabiliser</span>
+      <span><i class="ln"></i>successeur</span><span><i class="ln f"></i>doigts du nœud sélectionné</span><span><i class="ln l"></i>chemin du lookup</span>
+    </div>
+  </div>
+</section>
+
+<section class="card side">
+  <div class="tabs" role="tablist" id="tabs">
+    <button class="tab" role="tab" data-t="fing" aria-selected="true">Finger table</button>
+    <button class="tab" role="tab" data-t="look" aria-selected="false">Lookup</button>
+    <button class="tab" role="tab" data-t="ring" aria-selected="false">Anneau</button>
+    <button class="tab" role="tab" data-t="log" aria-selected="false">Journal</button>
+  </div>
+  <div class="pane" id="pane"></div>
+</section>
+</main>
+
+<script>
+"use strict";
+/* ============================ SHA-1 (autonome) ============================ */
+function sha1hex(msg){
+  const rotl=(n,s)=>((n<<s)|(n>>>(32-s)))>>>0;
+  const b=Array.from(new TextEncoder().encode(msg)); const ml=b.length*8;
+  b.push(0x80); while(b.length%64!==56) b.push(0);
+  for(let i=7;i>=0;i--) b.push(i>=4?0:(ml>>>(i*8))&255);
+  let h0=0x67452301,h1=0xEFCDAB89,h2=0x98BADCFE,h3=0x10325476,h4=0xC3D2E1F0;
+  for(let o=0;o<b.length;o+=64){
+    const w=new Array(80);
+    for(let i=0;i<16;i++) w[i]=((b[o+4*i]<<24)|(b[o+4*i+1]<<16)|(b[o+4*i+2]<<8)|b[o+4*i+3])>>>0;
+    for(let i=16;i<80;i++) w[i]=rotl(w[i-3]^w[i-8]^w[i-14]^w[i-16],1);
+    let a=h0,bb=h1,c=h2,d=h3,e=h4;
+    for(let i=0;i<80;i++){
+      let f,k;
+      if(i<20){f=(bb&c)|(~bb&d);k=0x5A827999}else if(i<40){f=bb^c^d;k=0x6ED9EBA1}
+      else if(i<60){f=(bb&c)|(bb&d)|(c&d);k=0x8F1BBCDC}else{f=bb^c^d;k=0xCA62C1D6}
+      const t=(rotl(a,5)+(f>>>0)+e+k+w[i])>>>0; e=d; d=c; c=rotl(bb,30); bb=a; a=t;
+    }
+    h0=(h0+a)>>>0;h1=(h1+bb)>>>0;h2=(h2+c)>>>0;h3=(h3+d)>>>0;h4=(h4+e)>>>0;
+  }
+  return [h0,h1,h2,h3,h4].map(x=>x.toString(16).padStart(8,"0")).join("");
+}
+
+/* ============================ Moteur Chord ============================ */
+const S={m:6,size:64,nodes:new Map(),keys:new Map(),replicate:false,selected:null,
+  anim:null,flash:new Set(),ghosts:[],changed:new Map(),enter:new Set(),log:[],tab:"fing",
+  lookupView:null,runId:0,auto:true,speed:1,step:false,resolveStep:null,timer:null,counter:0};
+
+const inOpen=(k,a,b)=>a<b?(a<k&&k<b):(k>a||k<b);
+const inHalf=(k,a,b)=>a<b?(a<k&&k<=b):(k>a||k<=b);
+const inClosedOpen=(k,a,b)=>a<b?(a<=k&&k<b):(k>=a||k<b);
+const startOf=(n,i)=>(n.id+2**i)%S.size;
+const sortedNodes=()=>[...S.nodes.values()].sort((a,b)=>a.id-b.id);
+function trueSucc(k){const r=sortedNodes();return r.find(n=>n.id>=k)||r[0]}
+function hashId(text){return Number(BigInt("0x"+sha1hex(text))%BigInt(S.size))}
+function keyId(txt){txt=String(txt).trim();return /^\d+$/.test(txt)?Number(txt)%S.size:hashId(txt)}
+function makeNode(id,name){return {id,name:name||("N"+id),fingers:[],pred:null,succList:[],data:new Set(),replica:new Set(),alive:true}}
+const succ=n=>n.fingers[0];
+
+function aliveSucc(n){
+  if(!n.fingers[0].alive){
+    let f=n.succList.find(x=>x.alive)||n.fingers.find(x=>x.alive)||n;
+    n.fingers[0]=f;
+  }
+  return n.fingers[0];
+}
+function closestPreceding(n,k){
+  for(let i=S.m-1;i>=0;i--){const f=n.fingers[i];if(f.alive&&inOpen(f.id,n.id,k))return{node:f,i}}
+  return{node:n,i:-1};
+}
+function findPredecessor(n0,k,trace){
+  let n=n0,hops=0;
+  while(!inHalf(k,n.id,aliveSucc(n).id)){
+    const cp=closestPreceding(n,k); if(cp.node===n)break;
+    if(trace)trace.push({at:n,i:cp.i,to:cp.node,start:startOf(n,cp.i)});
+    n=cp.node; if(++hops>4*S.m+64)break;
+  }
+  return n;
+}
+function findSuccessor(n0,k,trace){
+  const p=findPredecessor(n0,k,trace); const s=aliveSucc(p);
+  if(trace)trace.push({at:p,done:true,succ:s}); return s;
+}
+function updateFingerTable(n,s,i,depth){
+  if(s===n||depth>4*S.nodes.size+8)return;
+  if(inClosedOpen(s.id,n.id,n.fingers[i].id)){
+    n.fingers[i]=s; if(n.pred&&n.pred.alive)updateFingerTable(n.pred,s,i,depth+1);
+  }
+}
+function firstNode(n){n.fingers=new Array(S.m).fill(n);n.pred=n;n.succList=[n];S.nodes.set(n.id,n)}
+function joinSeq(node,via){
+  const s=findSuccessor(via,node.id);
+  node.fingers=new Array(S.m).fill(s); node.fingers[0]=s;
+  node.pred=s.pred; s.pred=node;
+  for(let i=0;i<S.m-1;i++){
+    const st=startOf(node,i+1);
+    node.fingers[i+1]=inClosedOpen(st,node.id,node.fingers[i].id)?node.fingers[i]
+      :inHalf(st,node.pred.id,node.id)?node:findSuccessor(via,st);
+  }
+  S.nodes.set(node.id,node);
+  const moved=[];
+  for(const k of [...s.data]) if(inHalf(k,node.pred.id,node.id)){s.data.delete(k);node.data.add(k);moved.push(k)}
+  for(let i=0;i<S.m;i++){
+    const p=findPredecessor(node,(node.id-2**i+1+S.size)%S.size);
+    updateFingerTable(p,node,i,0);
+  }
+  node.succList=[s];
+  return{succ:s,pred:node.pred,moved};
+}
+function joinConc(node,via){
+  const s=findSuccessor(via,node.id);
+  node.fingers=new Array(S.m).fill(s); node.pred=null; node.succList=[s];
+  S.nodes.set(node.id,node); return{succ:s};
+}
+function leaveGraceful(node){
+  const others=sortedNodes().filter(n=>n!==node);
+  let s=(succ(node)!==node&&succ(node).alive)?succ(node):others[0];
+  const p=(node.pred&&node.pred.alive&&node.pred!==node)?node.pred:null;
+  node.alive=false; S.nodes.delete(node.id);
+  for(const k of node.data)s.data.add(k); node.data=new Set();
+  for(const n of S.nodes.values()){
+    for(let i=0;i<S.m;i++) if(n.fingers[i]===node)n.fingers[i]=s;
+    if(n.pred===node)n.pred=p;
+    n.succList=n.succList.filter(x=>x!==node);
+  }
+  if(p&&p!==node)s.pred=p;
+  return{succ:s,pred:p};
+}
+function crashNode(node){
+  node.alive=false; S.nodes.delete(node.id);
+  let rec=[];
+  if(S.replicate){
+    const r=sortedNodes(); const s=r.find(n=>n.id>node.id)||r[0];
+    if(s)for(const k of s.replica){ if(node.data.has(k)){s.data.add(k);rec.push(k)} }
+  }
+  return rec;
+}
+/* stabilisation */
+function checkPred(n){if(n.pred&&!n.pred.alive)n.pred=null}
+function notify(t,n){
+  if(t.pred===null||!t.pred.alive||inOpen(n.id,t.pred.id,t.id)){
+    t.pred=n;
+    for(const k of [...t.data]) if(!inHalf(k,n.id,t.id)){t.data.delete(k);n.data.add(k)}
+  }
+}
+function stabilize(n){
+  let s=aliveSucc(n); const x=s.pred;
+  if(x&&x.alive&&x!==n&&inOpen(x.id,n.id,s.id)){n.fingers[0]=s=x}
+  notify(s,n);
+  n.succList=[s,...s.succList.filter(z=>z.alive&&z!==n)].slice(0,3);
+}
+function fixFingers(n){for(let i=0;i<S.m;i++)n.fingers[i]=findSuccessor(n,startOf(n,i))}
+function stabilizeRound(){
+  for(const n of sortedNodes()){checkPred(n);stabilize(n)}
+  for(const n of sortedNodes())fixFingers(n);
+}
+function snapshot(){
+  const m=new Map(); for(const n of S.nodes.values())m.set(n.id,{f:n.fingers.map(x=>x.id),p:n.pred?n.pred.id:null});
+  return m;
+}
+function diff(before,after){
+  const out=new Map();
+  for(const [id,a] of after){const b=before.get(id); if(!b){continue}
+    const set=new Set(); a.f.forEach((v,i)=>{if(v!==b.f[i])set.add(i)});
+    if(set.size||a.p!==b.p)out.set(id,{fingers:set,pred:a.p!==b.p});}
+  return out;
+}
+function errors(){
+  const r=sortedNodes(),bad=new Set(),list=[];
+  r.forEach((n,i)=>{
+    const ts=r[(i+1)%r.length],tp=r[(i-1+r.length)%r.length];
+    if(n.fingers[0]!==ts){bad.add(n.id);list.push(`N${n.id}: successeur`)}
+    if(n.pred!==tp){bad.add(n.id);list.push(`N${n.id}: prédécesseur`)}
+    for(let k=0;k<S.m;k++){ if(n.fingers[k]!==trueSucc(startOf(n,k))){bad.add(n.id);list.push(`N${n.id}: doigt ${k}`);break} }
+    for(const key of n.data) if(trueSucc(key)!==n){bad.add(n.id);list.push(`N${n.id}: clé
